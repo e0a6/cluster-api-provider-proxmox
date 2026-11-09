@@ -1465,10 +1465,8 @@ spec:
               rule: self.full || !has(self.format)
             - message: Must set full=true when specifying storage
               rule: self.full || !has(self.storage)
-            - message: Must specify either templateID+sourceNode, templateSelector,
-                or localStorage
+            - message: Must specify either templateID+sourceNode or templateSelector
               rule: has(self.templateSelector) || (has(self.templateID) && has(self.sourceNode))
-                || has(self.localStorage)
           status:
             description: status is the status of the Proxmox machine.
             properties:

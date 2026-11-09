@@ -185,7 +185,7 @@ const (
 )
 
 // TemplateSource defines the source of the template VM.
-// +kubebuilder:validation:XValidation:rule="has(self.templateSelector) || (has(self.templateID) && has(self.sourceNode)) || has(self.localStorage)",message="Must specify either templateID+sourceNode, templateSelector, or localStorage"
+// +kubebuilder:validation:XValidation:rule="has(self.templateSelector) || (has(self.templateID) && has(self.sourceNode))",message="Must specify either templateID+sourceNode or templateSelector"
 type TemplateSource struct {
 	// sourceNode is the initially selected proxmox node.
 	// This node will be used to locate the template VM, which will
