@@ -838,3 +838,57 @@ func TestProxmoxAPIClient_CloudInitStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestUpsertTemplateCandidateOrderIndependent(t *testing.T) {
+	type match struct {
+		vmid     uint64
+		distance int
+	}
+	tests := []struct {
+		name    string
+		policy  infrav1.TemplateMatchPolicy
+		matches []match
+		want    templateCandidate
+	}{
+		{
+			name:    "best subset: better match after two equal worse ones wins",
+			policy:  infrav1.TemplateMatchPolicyBest,
+			matches: []match{{1, 2}, {2, 2}, {3, 1}},
+			want:    templateCandidate{vmid: 3, distance: 1, matches: 1},
+		},
+		{
+			name:    "best subset: better match first wins",
+			policy:  infrav1.TemplateMatchPolicyBest,
+			matches: []match{{3, 1}, {1, 2}, {2, 2}},
+			want:    templateCandidate{vmid: 3, distance: 1, matches: 1},
+		},
+		{
+			name:    "best subset: equal best matches are ambiguous",
+			policy:  infrav1.TemplateMatchPolicyBest,
+			matches: []match{{1, 1}, {2, 2}, {3, 1}},
+			want:    templateCandidate{vmid: 1, distance: 1, matches: 2},
+		},
+		{
+			name:    "exact: non-zero distance is ignored",
+			policy:  infrav1.TemplateMatchPolicyExact,
+			matches: []match{{1, 1}, {2, 0}},
+			want:    templateCandidate{vmid: 2, distance: 0, matches: 1},
+		},
+		{
+			name:    "unique subset: any second match is ambiguous",
+			policy:  infrav1.TemplateMatchPolicySubset,
+			matches: []match{{1, 0}, {2, 3}},
+			want:    templateCandidate{vmid: 1, distance: 0, matches: 2},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			perNode := map[string]templateCandidate{}
+			for _, m := range test.matches {
+				upsertTemplateCandidate(perNode, &proxmox.ClusterResource{VMID: m.vmid, Node: "n1"}, m.distance, string(test.policy))
+			}
+			require.Equal(t, test.want, perNode["n1"])
+		})
+	}
+}

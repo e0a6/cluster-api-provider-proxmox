@@ -279,26 +279,29 @@ func (c *APIClient) findSingleVMTemplateByTags(ctx context.Context, templateTags
 type templateCandidate struct {
 	vmid     int32
 	distance int
+	matches  int
 }
 
 // upsertTemplateCandidate records vm as the template candidate for its node, honoring
-// matchPolicy. It returns an error if more than one template matches on the same node.
-func upsertTemplateCandidate(perNode map[string]templateCandidate, vm *proxmox.ClusterResource, distance int, matchPolicy string, templateTags []string) error {
+// matchPolicy, and counts equally good matches. Ambiguity is only judged after all
+// resources were seen, so the result does not depend on resource order (see #910).
+func upsertTemplateCandidate(perNode map[string]templateCandidate, vm *proxmox.ClusterResource, distance int, matchPolicy string) {
 	policy := infrav1.TemplateMatchPolicy(matchPolicy)
 	if policy == infrav1.TemplateMatchPolicyExact && distance != 0 {
-		return nil
+		return
 	}
 
 	existing, exists := perNode[vm.Node]
-	if exists && policy == infrav1.TemplateMatchPolicyBest && distance >= existing.distance {
-		return nil
+	switch {
+	case !exists, policy == infrav1.TemplateMatchPolicyBest && distance < existing.distance:
+		// a strictly better match invalidates all previous matches on this node.
+		perNode[vm.Node] = templateCandidate{vmid: int32(vm.VMID), distance: distance, matches: 1}
+	case policy == infrav1.TemplateMatchPolicyBest && distance > existing.distance:
+		// a worse match never displaces a better one.
+	default:
+		existing.matches++
+		perNode[vm.Node] = existing
 	}
-	if exists && (policy != infrav1.TemplateMatchPolicyBest || distance == existing.distance) {
-		return fmt.Errorf("%w: multiple VM templates found on node %q with tags %q", ErrMultipleTemplatesFound, vm.Node, strings.Join(templateTags, ";"))
-	}
-
-	perNode[vm.Node] = templateCandidate{vmid: int32(vm.VMID), distance: distance}
-	return nil
 }
 
 // findVMTemplatesLocalStorage finds one template per node in allowedNodes (local storage path).
@@ -340,9 +343,7 @@ func (c *APIClient) findVMTemplatesLocalStorage(ctx context.Context, templateTag
 		if !ok {
 			continue
 		}
-		if err := upsertTemplateCandidate(perNode, vm, distance, matchPolicy, templateTags); err != nil {
-			return nil, err
-		}
+		upsertTemplateCandidate(perNode, vm, distance, matchPolicy)
 	}
 
 	result := make(map[string]int32, len(allowedNodes))
@@ -350,6 +351,9 @@ func (c *APIClient) findVMTemplatesLocalStorage(ctx context.Context, templateTag
 		cand, ok := perNode[node]
 		if !ok {
 			return nil, fmt.Errorf("%w: no template found on node %q with tags %q", ErrTemplateNotFound, node, strings.Join(templateTags, ";"))
+		}
+		if cand.matches > 1 {
+			return nil, fmt.Errorf("%w: multiple VM templates found on node %q with tags %q", ErrMultipleTemplatesFound, node, strings.Join(templateTags, ";"))
 		}
 		result[node] = cand.vmid
 	}
